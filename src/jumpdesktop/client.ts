@@ -17,10 +17,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
 
+  const rawBody = await res.text();
+  console.log(
+    `[jumpdesktop] ${init?.method ?? "GET"} ${path} -> ${res.status}`,
+    init?.body ? `body=${init.body}` : "",
+    `response=${rawBody}`
+  );
+
   if (!res.ok) {
     let errors: ApiError[] = [];
     try {
-      const body = (await res.json()) as { errors?: ApiError[] };
+      const body = JSON.parse(rawBody) as { errors?: ApiError[] };
       errors = body?.errors ?? [];
     } catch {
       // response body wasn't JSON; fall through with empty errors
@@ -28,10 +35,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new JumpDesktopApiError(res.status, errors);
   }
 
-  if (res.status === 204) {
+  if (res.status === 204 || !rawBody) {
     return undefined as T;
   }
-  return (await res.json()) as T;
+  return JSON.parse(rawBody) as T;
 }
 
 /** Find a team member by email. Returns undefined if no user matches. */
