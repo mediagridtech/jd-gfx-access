@@ -18,11 +18,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   const rawBody = await res.text();
-  console.log(
-    `[jumpdesktop] ${init?.method ?? "GET"} ${path} -> ${res.status}`,
-    init?.body ? `body=${init.body}` : "",
-    `response=${rawBody}`
-  );
+  const method = init?.method ?? "GET";
+  if (method !== "GET") {
+    // Mutating calls only — doubles as an audit trail of who was granted/revoked access to what.
+    console.log(`[jumpdesktop] ${method} ${path} -> ${res.status} body=${init?.body ?? ""}`);
+  }
 
   if (!res.ok) {
     let errors: ApiError[] = [];

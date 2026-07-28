@@ -223,10 +223,18 @@ export function registerHandlers(app: App): void {
         );
       }
 
-      await grantDeviceAccess(teamId, state.computer.id, [requester.id]);
+      const devices = await listTeamDevices(teamId);
+      const device = devices.find((d) => d.id === state.computer?.id);
+      const alreadyHadAccess = device?.users.includes(requester.id) ?? false;
+
+      if (!alreadyHadAccess) {
+        await grantDeviceAccess(teamId, state.computer.id, [requester.id]);
+      }
 
       state.status = "submitted";
-      state.statusDetail = `:white_check_mark: <@${state.requesterId}> granted *${state.requesterEmail}* access to *${state.computer.name}* (${state.office}).`;
+      state.statusDetail = alreadyHadAccess
+        ? `:information_source: <@${state.requesterId}> requested access for *${state.requesterEmail}* to *${state.computer.name}* (${state.office}), but they already had it — no change made.`
+        : `:white_check_mark: <@${state.requesterId}> granted *${state.requesterEmail}* access to *${state.computer.name}* (${state.office}).`;
       pendingRequests.delete(key);
 
       await client.chat.update({
