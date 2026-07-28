@@ -20,9 +20,21 @@
 ### On-prem deployment (Docker — primary path)
 1. On the Docker host: `git clone git@github.com:mediagridtech/jd-gfx-access.git && cd jd-gfx-access`
 2. Create `.env` in the repo root (copy from `.env.example`, fill in real tokens — never commit this file)
-3. `docker compose up -d --build` (use `docker-compose up -d --build`, hyphenated, on older Docker installs without the Compose plugin — check with `docker compose version`; `znyvps1` needs the hyphenated form)
+3. `docker compose up -d --build` — check `docker compose version` first; use `docker-compose up -d --build` (hyphenated) if only the older standalone tool is present
 4. `docker compose logs -f` to confirm `Now connected to Slack` (or `docker-compose logs -f`)
 5. **Redeploying:** `git pull && docker compose up -d --build` (substitute the hyphenated form as needed)
+
+**`znyvps1` specifically can't use either `docker compose` or `docker-compose`:** its Docker daemon (29.6.1, API 1.55, min supported 1.40) is far newer than the installed `docker-compose` v1.25 client, which hardcodes an API request of 1.38 and doesn't respect `DOCKER_API_VERSION` overrides — every `docker-compose` invocation fails with `client version 1.38 is too old`. The plain `docker` CLI itself is fine (client API 1.41, above the daemon's 1.40 floor), so on this host `docker-compose.yml` is reference-only and deploys use raw commands instead:
+```bash
+# initial deploy
+docker build -t jd-gfx-access . && docker run -d --name jd-gfx-access --restart unless-stopped --env-file .env jd-gfx-access
+
+# redeploy
+git pull && docker build -t jd-gfx-access . && docker stop jd-gfx-access && docker rm jd-gfx-access && docker run -d --name jd-gfx-access --restart unless-stopped --env-file .env jd-gfx-access
+
+# logs
+docker logs -f jd-gfx-access
+```
 
 `restart: unless-stopped` in `docker-compose.yml` means the container survives host reboots and restarts automatically if it crashes, as long as the Docker daemon itself is enabled on boot (default on most distros).
 
