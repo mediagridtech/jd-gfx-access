@@ -3,7 +3,7 @@
 ## 📌 Quick Links
 - **Repository:** https://github.com/mediagridtech/jd-gfx-access (pushed 2026-07-28)
 - **Documentation:** [Jump Desktop OpenAPI Reference](https://jumpdesktop.com/openapi/#section/FAQ)
-- **Staging/Production:** TBD
+- **Production host:** `znyvps1` (Linux, Docker) — cloned to `~/jd-gfx-access` via a repo-scoped, read-only GitHub deploy key (`~/.ssh/jd_gfx_deploy_key` on that host). Deploy with `docker compose up -d --build` from that directory (see "On-prem deployment (Docker)" below).
 - **Issue Tracker:** TBD
 - **Slack Workflow:** "JD GFX Access Request" (built in Slack Workflow Builder — see screenshot reference)
 - **Jump Desktop Teams:**
@@ -86,11 +86,11 @@
 - [x] Draft Slack workflow form (office, computer, requester fields) — currently free-text for computer & requester
 - [x] Review Jump Desktop OpenAPI spec in detail — confirmed endpoints for listing team users, listing devices, and granting per-user machine access (see [API Endpoint Reference](#-api-endpoint-reference) below)
 - [x] Confirm auth model for Jump Desktop API — Bearer token (`ApiToken`), generated per-user via the web dashboard (Security page → Generate New Token). No OAuth flow.
-- [x] Decide tech stack + hosting for the webhook backend — Node.js/TypeScript + Slack Bolt (Socket Mode) on Render (see [Tech Stack](#-tech-stack))
+- [x] Decide tech stack + hosting for the webhook backend — Node.js/TypeScript + Slack Bolt (Socket Mode), hosted on-prem via Docker (see [Tech Stack](#-tech-stack); revised from the original Render plan)
 
 ### Phase 2 — Dynamic Form Data
-- [x] Replace "Which computer(s)?" free-text field with a dropdown populated from Jump Desktop machine inventory (per selected office/team) — scaffolded in `src/slack/handlers.ts` (`app.options(ACTION_IDS.computer, ...)`), untested against a live workspace
-- [x] Replace "Who needs access?" free-text field with a dropdown/lookup populated from Jump Desktop team users API — scaffolded (`app.options(ACTION_IDS.user, ...)`), filters client-side by name/email substring, untested
+- [x] Replace "Which computer(s)?" free-text field with a dropdown populated from Jump Desktop machine inventory (per selected office/team) — implemented in `src/slack/handlers.ts` (`app.options(ACTION_IDS.computer, ...)`), **confirmed working live** 2026-07-27 after fixing the office→dropdown state bug (see Phase 3 note below)
+- [x] Replace "Who needs access?" free-text field with a dropdown/lookup populated from Jump Desktop team users API — implemented (`app.options(ACTION_IDS.user, ...)`), filters client-side by name/email substring, confirmed working live
 - [x] Moved off native Workflow Builder entirely — the request form is now a Bolt-driven modal (`src/slack/modal.ts`) opened via slash command, since Workflow Builder can't back a dropdown with live API data
 
 ### Phase 3 — Access Assignment Automation
@@ -98,9 +98,11 @@
 - [x] Implement Jump Desktop API call to grant the requested user access — `grantDeviceAccess()` in `src/jumpdesktop/client.ts`, wired into the submission handler
 - [ ] Handle edge cases: user already has access (currently just re-adds, harmless but not called out to the requester), machine not found, invalid office/computer combination — only "user not found in team" is currently handled explicitly
 - [x] Post success/failure confirmation back to Slack — DM to submitter, optional mirror to `AUDIT_CHANNEL_ID`
-- [ ] **Not yet done:** register the actual Slack app (scopes, slash command, interactivity/Socket Mode config) and test this end-to-end against a real workspace + Jump Desktop team
+- [x] Slack app registered (bot token, app-level token, `/jdgfxaccess` slash command, Socket Mode + Interactivity enabled) and end-to-end flow **confirmed working** 2026-07-27 against a real workspace + Jump Desktop team
+  - Bug fixed along the way: Slack's `block_suggestions` (options) payload doesn't reliably include sibling field values in `view.state.values` — the office selection is now threaded through the modal's `private_metadata` instead (see `src/slack/modal.ts` and the `app.action(ACTION_IDS.office, ...)` handler in `handlers.ts`)
 
 ### Phase 4 — Hardening & Rollout
+- [x] Deployed on-prem: `znyvps1` (Linux/Docker), cloned via a repo-scoped read-only deploy key, run with `docker compose up -d --build` — see "On-prem deployment (Docker)" above
 - [ ] Add logging/audit trail of who was granted access to what, when, and by whom
 - [ ] Add error handling/retry for Jump Desktop API failures
 - [ ] Access revocation flow (out of scope for v1? — confirm with stakeholders)
