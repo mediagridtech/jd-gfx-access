@@ -3,7 +3,7 @@
 ## 📌 Quick Links
 - **Repository:** https://github.com/mediagridtech/jd-gfx-access (pushed 2026-07-28)
 - **Documentation:** [Jump Desktop OpenAPI Reference](https://jumpdesktop.com/openapi/#section/FAQ)
-- **Production host:** `znyvps1` (Linux, Docker) — cloned to `~/jd-gfx-access` via a repo-scoped, read-only GitHub deploy key (`~/.ssh/jd_gfx_deploy_key` on that host). Deploy with `docker compose up -d --build` from that directory (see "On-prem deployment (Docker)" below).
+- **Production host:** `znyvps1` (Linux, Docker Engine 20.10.5 — old enough that only the standalone `docker-compose` v1.25 CLI is available, not the `docker compose` plugin) — cloned to `~/jd-gfx-access` via a repo-scoped, read-only GitHub deploy key (`~/.ssh/jd_gfx_deploy_key` on that host). Deploy with `docker-compose up -d --build` (hyphenated) from that directory (see "On-prem deployment (Docker)" below).
 - **Issue Tracker:** TBD
 - **Slack Workflow:** "JD GFX Access Request" (built in Slack Workflow Builder — see screenshot reference)
 - **Jump Desktop Teams:**
@@ -20,9 +20,9 @@
 ### On-prem deployment (Docker — primary path)
 1. On the Docker host: `git clone git@github.com:mediagridtech/jd-gfx-access.git && cd jd-gfx-access`
 2. Create `.env` in the repo root (copy from `.env.example`, fill in real tokens — never commit this file)
-3. `docker compose up -d --build`
-4. `docker compose logs -f` to confirm `Now connected to Slack`
-5. **Redeploying:** `git pull && docker compose up -d --build`
+3. `docker compose up -d --build` (use `docker-compose up -d --build`, hyphenated, on older Docker installs without the Compose plugin — check with `docker compose version`; `znyvps1` needs the hyphenated form)
+4. `docker compose logs -f` to confirm `Now connected to Slack` (or `docker-compose logs -f`)
+5. **Redeploying:** `git pull && docker compose up -d --build` (substitute the hyphenated form as needed)
 
 `restart: unless-stopped` in `docker-compose.yml` means the container survives host reboots and restarts automatically if it crashes, as long as the Docker daemon itself is enabled on boot (default on most distros).
 
