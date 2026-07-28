@@ -14,10 +14,19 @@
 - **Language:** Node.js 20 LTS + TypeScript
 - **Framework:** [Slack Bolt for JS](https://slack.dev/bolt-js), run in **Socket Mode** — the app opens an outbound WebSocket to Slack, so it needs no public HTTPS endpoint, no signing-secret verification, no reverse proxy. This matters because Phase 2 (dynamic computer/user dropdowns) requires a real Slack app modal with `external_select` options, which Bolt can serve entirely over Socket Mode.
 - **Database:** None for v1 — Jump Desktop is the source of truth for machines/users. Audit trail (Phase 4) starts as structured logs + a confirmation post to an admin Slack channel; revisit a real datastore only if that proves insufficient.
-- **Infrastructure:** On-prem Linux server/VM, run as a `systemd` service (`deploy/jd-gfx-access.service`) — always-on process, no public ingress needed since it's Socket Mode, so no reverse proxy/TLS/firewall rule required at all, just outbound internet access.
-- **Decided:** 2026-07-24 (stack), revised 2026-07-28 (hosting: Render → on-prem). Render's Background Worker tier has no free plan (~$7/mo minimum), and since Socket Mode has zero inbound requirements, an existing internal server is a better fit than paying for managed hosting. `render.yaml` is left in the repo as a fallback if on-prem ever becomes impractical.
+- **Infrastructure:** On-prem Linux server/VM with Docker, run via `docker compose` (`Dockerfile` + `docker-compose.yml`) — always-on container, no public ingress needed since it's Socket Mode, so no reverse proxy/TLS/firewall rule required at all, just outbound internet access. A raw `systemd` unit (`deploy/jd-gfx-access.service`) is also in the repo for a non-Docker host, but Docker is the primary path since Docker's own restart policy handles process supervision.
+- **Decided:** 2026-07-24 (stack), revised 2026-07-28 (hosting: Render → on-prem, then on-prem/systemd → on-prem/Docker once a Docker-equipped Linux box was confirmed available). Render's Background Worker tier has no free plan (~$7/mo minimum), and since Socket Mode has zero inbound requirements, an existing internal server is a better fit than paying for managed hosting. `render.yaml` is left in the repo as a fallback if on-prem ever becomes impractical.
 
-### On-prem deployment (systemd)
+### On-prem deployment (Docker — primary path)
+1. On the Docker host: `git clone git@github.com:mediagridtech/jd-gfx-access.git && cd jd-gfx-access`
+2. Create `.env` in the repo root (copy from `.env.example`, fill in real tokens — never commit this file)
+3. `docker compose up -d --build`
+4. `docker compose logs -f` to confirm `Now connected to Slack`
+5. **Redeploying:** `git pull && docker compose up -d --build`
+
+`restart: unless-stopped` in `docker-compose.yml` means the container survives host reboots and restarts automatically if it crashes, as long as the Docker daemon itself is enabled on boot (default on most distros).
+
+### On-prem deployment (systemd — fallback for a non-Docker host)
 1. On the target server: install Node.js 20 LTS, then `git clone` this repo to e.g. `/opt/jd-gfx-access`
 2. `cd /opt/jd-gfx-access && npm install && npm run build`
 3. Create `/opt/jd-gfx-access/.env` on the server directly (copy from `.env.example`, fill in real tokens — never commit this file)
@@ -27,7 +36,7 @@
 7. `sudo journalctl -u jd-gfx-access -f` to confirm `Now connected to Slack` in the logs
 8. **Redeploying:** `git pull && npm install && npm run build && sudo systemctl restart jd-gfx-access`
 
-**Critical constraint learned during local testing:** Slack allows only one active Socket Mode connection per app token. Running this anywhere else (a laptop, a second server) at the same time as the systemd service will cause connection flapping/crashes. Once the systemd service is confirmed running, stop any local `npm run dev` permanently.
+**Critical constraint learned during local testing:** Slack allows only one active Socket Mode connection per app token. Running this anywhere else (a laptop, a second server) at the same time as the deployed instance will cause connection flapping/crashes. Once the Docker container (or systemd service) is confirmed running, stop any local `npm run dev` permanently.
 
 ## 🚀 Local Development Setup
 1. **Prerequisites:** Node.js 20 LTS, a Slack app with Socket Mode enabled (App-Level Token with `connections:write` scope)

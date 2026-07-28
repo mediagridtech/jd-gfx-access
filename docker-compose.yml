@@ -1,0 +1,6 @@
+services:
+  jd-gfx-access:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
