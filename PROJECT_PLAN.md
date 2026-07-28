@@ -1,7 +1,7 @@
 # Project Name: JD GFX Access Request
 
 ## 📌 Quick Links
-- **Repository:** this directory (`/Users/jc/Documents/ZLA/JumpDesktopAccess`) — scaffolded 2026-07-27, not yet pushed to a git remote
+- **Repository:** https://github.com/mediagridtech/jd-gfx-access (pushed 2026-07-28)
 - **Documentation:** [Jump Desktop OpenAPI Reference](https://jumpdesktop.com/openapi/#section/FAQ)
 - **Staging/Production:** TBD
 - **Issue Tracker:** TBD
@@ -14,8 +14,20 @@
 - **Language:** Node.js 20 LTS + TypeScript
 - **Framework:** [Slack Bolt for JS](https://slack.dev/bolt-js), run in **Socket Mode** — the app opens an outbound WebSocket to Slack, so it needs no public HTTPS endpoint, no signing-secret verification, no reverse proxy. This matters because Phase 2 (dynamic computer/user dropdowns) requires a real Slack app modal with `external_select` options, which Bolt can serve entirely over Socket Mode.
 - **Database:** None for v1 — Jump Desktop is the source of truth for machines/users. Audit trail (Phase 4) starts as structured logs + a confirmation post to an admin Slack channel; revisit a real datastore only if that proves insufficient.
-- **Infrastructure:** [Render](https://render.com) Background Worker service (always-on process, no public ingress needed since it's Socket Mode). Push-to-deploy from git, encrypted env vars built in, cheap always-on tier, no AWS account/IAM/API Gateway setup required.
-- **Decided:** 2026-07-24. If the org already standardizes on AWS, the equivalent would be a small Fargate task or EC2 box (Lambda doesn't fit — Socket Mode needs a persistent connection, which would force HTTP mode + API Gateway instead, giving up the "no public endpoint" benefit).
+- **Infrastructure:** On-prem Linux server/VM, run as a `systemd` service (`deploy/jd-gfx-access.service`) — always-on process, no public ingress needed since it's Socket Mode, so no reverse proxy/TLS/firewall rule required at all, just outbound internet access.
+- **Decided:** 2026-07-24 (stack), revised 2026-07-28 (hosting: Render → on-prem). Render's Background Worker tier has no free plan (~$7/mo minimum), and since Socket Mode has zero inbound requirements, an existing internal server is a better fit than paying for managed hosting. `render.yaml` is left in the repo as a fallback if on-prem ever becomes impractical.
+
+### On-prem deployment (systemd)
+1. On the target server: install Node.js 20 LTS, then `git clone` this repo to e.g. `/opt/jd-gfx-access`
+2. `cd /opt/jd-gfx-access && npm install && npm run build`
+3. Create `/opt/jd-gfx-access/.env` on the server directly (copy from `.env.example`, fill in real tokens — never commit this file)
+4. Create a dedicated unprivileged user to run the service: `sudo useradd -r -s /usr/sbin/nologin jdgfx` (or adjust the `User=` line in the unit file to whatever account you use), then `chown -R jdgfx:jdgfx /opt/jd-gfx-access`
+5. `sudo cp deploy/jd-gfx-access.service /etc/systemd/system/`
+6. `sudo systemctl daemon-reload && sudo systemctl enable --now jd-gfx-access`
+7. `sudo journalctl -u jd-gfx-access -f` to confirm `Now connected to Slack` in the logs
+8. **Redeploying:** `git pull && npm install && npm run build && sudo systemctl restart jd-gfx-access`
+
+**Critical constraint learned during local testing:** Slack allows only one active Socket Mode connection per app token. Running this anywhere else (a laptop, a second server) at the same time as the systemd service will cause connection flapping/crashes. Once the systemd service is confirmed running, stop any local `npm run dev` permanently.
 
 ## 🚀 Local Development Setup
 1. **Prerequisites:** Node.js 20 LTS, a Slack app with Socket Mode enabled (App-Level Token with `connections:write` scope)

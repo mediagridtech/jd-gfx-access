@@ -1,0 +1,19 @@
+[Unit]
+Description=JD GFX Access Request Slack app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jdgfx
+WorkingDirectory=/opt/jd-gfx-access
+EnvironmentFile=/opt/jd-gfx-access/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+# Only one Socket Mode connection per app token can be active at a time —
+# see PROJECT_PLAN.md's on-prem deployment notes before running a second
+# copy anywhere (locally or on another host).
+
+[Install]
+WantedBy=multi-user.target
