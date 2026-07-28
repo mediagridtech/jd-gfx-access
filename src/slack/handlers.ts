@@ -23,14 +23,24 @@ function stateKey(channel: string, ts: string): string {
 }
 
 export function registerHandlers(app: App): void {
-  app.command(OPEN_REQUEST_COMMAND, async ({ ack, body, client }) => {
+  app.command(OPEN_REQUEST_COMMAND, async ({ ack, body, client, respond }) => {
     await ack();
     const state: RequestState = { requesterId: body.user_id };
-    const posted = await client.chat.postMessage({
-      channel: body.channel_id,
-      text: "JD GFX Access Request",
-      blocks: buildRequestBlocks(state),
-    });
+    let posted;
+    try {
+      posted = await client.chat.postMessage({
+        channel: body.channel_id,
+        text: "JD GFX Access Request",
+        blocks: buildRequestBlocks(state),
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const hint = detail.includes("not_in_channel")
+        ? "Invite this app into the channel first (`/invite @JD GFX Access` or whatever it's named), then try again."
+        : `Couldn't post the request form: ${detail}`;
+      await respond({ response_type: "ephemeral", text: hint });
+      return;
+    }
     if (posted.channel && posted.ts) {
       pendingRequests.set(stateKey(posted.channel, posted.ts), state);
     }
