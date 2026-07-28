@@ -1,0 +1,32 @@
+{
+  "name": "jd-gfx-access",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slack app that grants Jump Desktop GFX machine access based on the JD GFX Access Request form",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@slack/bolt": "^3.19.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "eslint": "^8.57.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "@slack/socket-mode": "^2.0.7"
+  }
+}

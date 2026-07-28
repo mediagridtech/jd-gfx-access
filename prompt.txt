@@ -1,0 +1,15 @@
+this project is about assigning a gfx machine to a user based on a slack workflow request. machines are running on both macos and windows. remote access is via jumpdesktop (https://jumpdesktop.com/) API
+adding this URL for reference https://jumpdesktop.com/openapi/#section/FAQ. 
+the slack workflow request is simple JD GFX Access Request, details below 
+
+request form 
+question 1 Which office is the machine located in?
+NY or LA 
+question 2 Which computer(s)?
+i'll add a drop down menu 
+question 3 Who needs access?
+name of user who requests access 
+
+for question number 3, im thinking if possible, via API, pull the names of all users within the NY and LA, users ZNYGFX Users https://app.jumpdesktop.com/dashboard/teams/T-01GW30D3R7T1717HTHWYQ7DW45/users 
+and LA ZLAGFX Users https://app.jumpdesktop.com/dashboard/teams/T-01H6VNE44DZDD0C2TVZC1Z4V57/users
+
