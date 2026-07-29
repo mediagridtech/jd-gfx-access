@@ -76,21 +76,21 @@ docker logs -f jd-gfx-access
 - **Type checking:** `npm run typecheck`
 
 ## 📋 Architecture & Standards
-- **Pattern:** Slack Bolt app (Socket Mode) — replaces the original Workflow Builder form with a Bolt-driven modal so the computer/user dropdowns can be backed by live Jump Desktop data
-- **Flow (as implemented in the scaffold):**
-  1. A slash command (`/jdgfxaccess`, see `OPEN_MODAL_COMMAND` in `src/slack/handlers.ts`) opens the **JD GFX Access Request** modal
-  2. User picks an office (static_select), then a computer and requester (`external_select` menus scoped to that office's team, options fetched live from Jump Desktop as the user types)
-  3. On submit, the handler resolves the requester's email → Jump Desktop user ID, then calls `POST /device/{deviceID}/members` to grant access
-  4. A confirmation or failure message is DMed back to the submitter, and optionally mirrored to `AUDIT_CHANNEL_ID`
-- **Styling:** N/A (backend service, no UI beyond the Slack modal)
+- **Pattern:** Slack Bolt app (Socket Mode) — replaces the original Workflow Builder form with a Bolt-driven in-channel message so the computer/user dropdowns can be backed by live Jump Desktop data and the whole request is visible in-channel
+- **Flow (current, as of the 2026-07-28 modal→message rework):**
+  1. A slash command (`/jdgfxaccess`, see `OPEN_REQUEST_COMMAND` in `src/slack/handlers.ts`) posts the **JD GFX Access Request** message into the channel it was run in (the bot must be a member of that channel)
+  2. User picks an office (static_select), then a computer and requester (`external_select` menus scoped to that office's team, options fetched live from Jump Desktop as the user types) — each selection rebuilds the message via `chat.update`, with field state held in an in-memory `Map` keyed by `channel:messageTs`
+  3. On **Submit**, the handler resolves the requester's email → Jump Desktop user ID, checks whether they already have access to the selected device, and if not calls `POST /device/{deviceID}/members` to grant it
+  4. The message is updated in place with a confirmation/failure/already-had-it result, visible to everyone in the channel, and optionally mirrored to `AUDIT_CHANNEL_ID`
+- **Styling:** N/A (backend service, no UI beyond the Slack message)
 - **Key Files:**
   - `src/index.ts` — Bolt app bootstrap, Socket Mode start
   - `src/config.ts` — env var loading/validation
-  - `src/jumpdesktop/client.ts` — Jump Desktop API client (`findTeamUserByEmail`, `listTeamDevices`, `listTeamUsers`, `grantDeviceAccess`, `revokeDeviceAccess`, `getDeviceConnectionUrls`)
+  - `src/jumpdesktop/client.ts` — Jump Desktop API client (`findTeamUserByEmail`, `listTeamDevices`, `listTeamUsers`, `grantDeviceAccess`, `revokeDeviceAccess`, `getDeviceConnectionUrls`); logs every mutating call for audit purposes
   - `src/jumpdesktop/types.ts` — API response types + `JumpDesktopApiError`
-  - `src/slack/modal.ts` — builds the request modal's blocks
+  - `src/slack/message.ts` — builds the in-channel request message's blocks, given a `RequestState`
   - `src/slack/teams.ts` — office code ↔ Jump Desktop team ID mapping
-  - `src/slack/handlers.ts` — slash command, `external_select` options handlers, `view_submission` handler (the core grant-access logic)
+  - `src/slack/handlers.ts` — slash command, per-field `block_actions`/`options` handlers, submit/cancel handlers (the core grant-access logic, plus the in-memory per-message state store)
 
 ## 📅 Roadmap & Status
 
@@ -101,21 +101,26 @@ docker logs -f jd-gfx-access
 - [x] Decide tech stack + hosting for the webhook backend — Node.js/TypeScript + Slack Bolt (Socket Mode), hosted on-prem via Docker (see [Tech Stack](#-tech-stack); revised from the original Render plan)
 
 ### Phase 2 — Dynamic Form Data
-- [x] Replace "Which computer(s)?" free-text field with a dropdown populated from Jump Desktop machine inventory (per selected office/team) — implemented in `src/slack/handlers.ts` (`app.options(ACTION_IDS.computer, ...)`), **confirmed working live** 2026-07-27 after fixing the office→dropdown state bug (see Phase 3 note below)
+- [x] Replace "Which computer(s)?" free-text field with a dropdown populated from Jump Desktop machine inventory (per selected office/team) — implemented in `src/slack/handlers.ts` (`app.options(ACTION_IDS.computer, ...)`), confirmed working live
 - [x] Replace "Who needs access?" free-text field with a dropdown/lookup populated from Jump Desktop team users API — implemented (`app.options(ACTION_IDS.user, ...)`), filters client-side by name/email substring, confirmed working live
-- [x] Moved off native Workflow Builder entirely — the request form is now a Bolt-driven modal (`src/slack/modal.ts`) opened via slash command, since Workflow Builder can't back a dropdown with live API data
+- [x] Moved off native Workflow Builder entirely — the request form is a Bolt-driven UI opened via slash command, since Workflow Builder can't back a dropdown with live API data. **Revised 2026-07-28:** originally a modal (`src/slack/modal.ts`), then changed to an in-channel message (`src/slack/message.ts`) per user preference — visible to everyone in the channel rather than a private popup. See the architecture note in Phase 3 below for what that rework involved.
 
 ### Phase 3 — Access Assignment Automation
-- [x] Implement handler to receive form submissions — `app.view(CALLBACK_ID, ...)` in `src/slack/handlers.ts` (Socket Mode `view_submission`, not an HTTP endpoint)
-- [x] Implement Jump Desktop API call to grant the requested user access — `grantDeviceAccess()` in `src/jumpdesktop/client.ts`, wired into the submission handler
-- [ ] Handle edge cases: user already has access (currently just re-adds, harmless but not called out to the requester), machine not found, invalid office/computer combination — only "user not found in team" is currently handled explicitly
-- [x] Post success/failure confirmation back to Slack — DM to submitter, optional mirror to `AUDIT_CHANNEL_ID`
-- [x] Slack app registered (bot token, app-level token, `/jdgfxaccess` slash command, Socket Mode + Interactivity enabled) and end-to-end flow **confirmed working** 2026-07-27 against a real workspace + Jump Desktop team
-  - Bug fixed along the way: Slack's `block_suggestions` (options) payload doesn't reliably include sibling field values in `view.state.values` — the office selection is now threaded through the modal's `private_metadata` instead (see `src/slack/modal.ts` and the `app.action(ACTION_IDS.office, ...)` handler in `handlers.ts`)
+- [x] Implement handler to receive form submissions — originally `app.view(CALLBACK_ID, ...)` (modal `view_submission`), now `app.action(ACTION_IDS.submit, ...)` reacting to a button click on the in-channel message
+- [x] Implement Jump Desktop API call to grant the requested user access — `grantDeviceAccess()` in `src/jumpdesktop/client.ts`, wired into the submit handler
+- [x] Handle edge cases:
+  - "User already has access" — **hit in real testing** 2026-07-28 (a request for joe@zealotinc.com on a machine he already had direct access to looked like a no-op and was initially mistaken for a bug). Fixed: the submit handler now fetches the device's current `users[]` first and reports "already had it — no change made" instead of a false "granted" message; skips the redundant API call entirely.
+  - "User not found in team" — explicit error, handled
+  - "Bot not in channel" (`not_in_channel` from `chat.postMessage`) — hit during the in-channel rework; caught and reported with a hint to `/invite` the app
+  - Machine not found / invalid office-computer combination — still unhandled (low priority; the dropdowns only ever offer valid combinations, so this would require a stale/tampered client)
+- [x] Post success/failure confirmation back to Slack — updates the request message in place (visible to the whole channel), optional mirror to `AUDIT_CHANNEL_ID`
+- [x] Slack app registered (bot token, app-level token, `/jdgfxaccess` slash command, Socket Mode + Interactivity enabled) and end-to-end flow **confirmed working** against a real workspace + Jump Desktop team, including a real access grant verified directly against the Jump Desktop API (not just our own app's claim)
+
+**Architecture note — modal → in-channel message (2026-07-28):** User wanted the request form visible in the channel rather than a separate modal popup. This was a real rework, not a tweak: a modal has built-in field-state tracking (`view.state.values` / `private_metadata`); a channel message has none. State (`RequestState`: requester, office, computer, requester email) is now held in an in-memory `Map` keyed by `channel:messageTs` (`src/slack/handlers.ts`), and the message is rebuilt via `chat.update` after every field selection. Only the original requester can interact with their own request's buttons/selects (enforced via an ephemeral `respond()` rejection otherwise). `src/slack/modal.ts` was deleted; `src/slack/message.ts` replaced it as the block builder. Note this state is process-local — fine under the existing "one instance only" constraint, but would need a shared store if this ever ran as multiple replicas.
 
 ### Phase 4 — Hardening & Rollout
-- [x] Deployed on-prem: `znyvps1` (Linux/Docker), cloned via a repo-scoped read-only deploy key, run with `docker compose up -d --build` — see "On-prem deployment (Docker)" above
-- [ ] Add logging/audit trail of who was granted access to what, when, and by whom
+- [x] Deployed on-prem: `znyvps1` (Linux/Docker), cloned via a repo-scoped read-only deploy key — see "On-prem deployment (Docker)" above for the raw `docker build`/`run` commands this host actually needs (its `docker-compose` is too old for its own daemon)
+- [x] Logging/audit trail of who was granted access to what, when — `src/jumpdesktop/client.ts` logs every mutating Jump Desktop API call (method, path, status, request body) to stdout (`docker logs`); optional `AUDIT_CHANNEL_ID` mirrors confirmations into a Slack channel too
 - [ ] Add error handling/retry for Jump Desktop API failures
 - [ ] Access revocation flow (out of scope for v1? — confirm with stakeholders)
 - [ ] Document runbook for troubleshooting failed requests
