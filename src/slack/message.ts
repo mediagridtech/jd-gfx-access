@@ -15,8 +15,6 @@ export const DURATION_OPTIONS: { label: string; days: number }[] = [
   { label: "3 days", days: 3 },
   { label: "7 days", days: 7 },
   { label: "14 days", days: 14 },
-  { label: "30 days", days: 30 },
-  { label: "90 days", days: 90 },
 ];
 
 export interface RequestState {
