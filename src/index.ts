@@ -1,5 +1,6 @@
 import { App } from "@slack/bolt";
 import { config } from "./config";
+import { startExpirationScheduler } from "./grants/scheduler";
 import { registerHandlers } from "./slack/handlers";
 
 const app = new App({
@@ -13,4 +14,5 @@ registerHandlers(app);
 (async () => {
   await app.start();
   console.log("JD GFX Access Request app is running (Socket Mode)");
+  startExpirationScheduler(app);
 })();

@@ -5,9 +5,19 @@ export const ACTION_IDS = {
   office: "gfx_office_select",
   computer: "gfx_computer_select",
   user: "gfx_user_select",
+  duration: "gfx_duration_select",
   submit: "gfx_submit",
   cancel: "gfx_cancel",
 } as const;
+
+export const DURATION_OPTIONS: { label: string; days: number }[] = [
+  { label: "1 day", days: 1 },
+  { label: "3 days", days: 3 },
+  { label: "7 days", days: 7 },
+  { label: "14 days", days: 14 },
+  { label: "30 days", days: 30 },
+  { label: "90 days", days: 90 },
+];
 
 export interface RequestState {
   requesterId: string;
@@ -15,6 +25,7 @@ export interface RequestState {
   computer?: { id: string; name: string };
   requesterEmail?: string;
   requesterLabel?: string;
+  durationDays?: number;
   status?: "submitted" | "cancelled" | "error";
   statusDetail?: string;
 }
@@ -101,6 +112,30 @@ export function buildRequestBlocks(state: RequestState): KnownBlock[] {
               },
             }
           : {}),
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: state.durationDays ? `*Duration:* ${state.durationDays} day(s)` : "*How many days should access last?*",
+      },
+      accessory: {
+        type: "static_select",
+        action_id: ACTION_IDS.duration,
+        placeholder: { type: "plain_text", text: "Select a duration" },
+        ...(state.durationDays
+          ? {
+              initial_option: {
+                text: { type: "plain_text", text: `${state.durationDays} day(s)` },
+                value: String(state.durationDays),
+              },
+            }
+          : {}),
+        options: DURATION_OPTIONS.map((o) => ({
+          text: { type: "plain_text", text: o.label },
+          value: String(o.days),
+        })),
       },
     },
     {

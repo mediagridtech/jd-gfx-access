@@ -27,16 +27,18 @@
 **`znyvps1` specifically can't use either `docker compose` or `docker-compose`:** its Docker daemon (29.6.1, API 1.55, min supported 1.40) is far newer than the installed `docker-compose` v1.25 client, which hardcodes an API request of 1.38 and doesn't respect `DOCKER_API_VERSION` overrides — every `docker-compose` invocation fails with `client version 1.38 is too old`. The plain `docker` CLI itself is fine (client API 1.41, above the daemon's 1.40 floor), so on this host `docker-compose.yml` is reference-only and deploys use raw commands instead:
 ```bash
 # initial deploy
-docker build -t jd-gfx-access . && docker run -d --name jd-gfx-access --restart unless-stopped --env-file .env jd-gfx-access
+docker build -t jd-gfx-access . && docker run -d --name jd-gfx-access --restart unless-stopped --env-file .env -v $(pwd)/data:/app/data jd-gfx-access
 
 # redeploy
-git pull && docker build -t jd-gfx-access . && docker stop jd-gfx-access && docker rm jd-gfx-access && docker run -d --name jd-gfx-access --restart unless-stopped --env-file .env jd-gfx-access
+git pull && docker build -t jd-gfx-access . && docker stop jd-gfx-access && docker rm jd-gfx-access && docker run -d --name jd-gfx-access --restart unless-stopped --env-file .env -v $(pwd)/data:/app/data jd-gfx-access
 
 # logs
 docker logs -f jd-gfx-access
 ```
 
 `restart: unless-stopped` in `docker-compose.yml` means the container survives host reboots and restarts automatically if it crashes, as long as the Docker daemon itself is enabled on boot (default on most distros).
+
+**The `-v $(pwd)/data:/app/data` mount is required, not optional.** Since `docker rm` deletes the old container on every redeploy, anything written only inside the container is lost at that point. `data/grants.json` (see below) tracks time-limited access grants that still need to expire — without the volume, a redeploy silently forgets about every pending auto-revocation.
 
 ### On-prem deployment (systemd — fallback for a non-Docker host)
 1. On the target server: install Node.js 20 LTS, then `git clone` this repo to e.g. `/opt/jd-gfx-access`
@@ -77,18 +79,21 @@ docker logs -f jd-gfx-access
 
 ## 📋 Architecture & Standards
 - **Pattern:** Slack Bolt app (Socket Mode) — replaces the original Workflow Builder form with a Bolt-driven in-channel message so the computer/user dropdowns can be backed by live Jump Desktop data and the whole request is visible in-channel
-- **Flow (current, as of the 2026-07-28 modal→message rework):**
-  1. A slash command (`/jdgfxaccess`, see `OPEN_REQUEST_COMMAND` in `src/slack/handlers.ts`) posts the **JD GFX Access Request** message into the channel it was run in (the bot must be a member of that channel)
-  2. User picks an office (static_select), then a computer and requester (`external_select` menus scoped to that office's team, options fetched live from Jump Desktop as the user types) — each selection rebuilds the message via `chat.update`, with field state held in an in-memory `Map` keyed by `channel:messageTs`
-  3. On **Submit**, the handler resolves the requester's email → Jump Desktop user ID, checks whether they already have access to the selected device, and if not calls `POST /device/{deviceID}/members` to grant it
+- **Flow (current, as of the 2026-07-31 time-limited-access feature):**
+  1. A slash command (`/jdgfxaccess`, see `OPEN_REQUEST_COMMAND` in `src/slack/handlers.ts`) posts the **JD GFX Access Request** message into the channel it was run in (the bot must be a member of that channel — invite it into private channels explicitly, since `chat:write.public` only covers public ones)
+  2. User picks an office (static_select), a computer and requester (`external_select` menus scoped to that office's team, options fetched live from Jump Desktop as the user types), and a duration (static_select, preset day counts — Slack section-block accessories can't take free-text/number input, only modals can, and this app deliberately avoids modals) — each selection rebuilds the message via `chat.update`, with field state held in an in-memory `Map` keyed by `channel:messageTs`
+  3. On **Submit**, the handler resolves the requester's email → Jump Desktop user ID, checks whether they already have access to the selected device, and if not calls `POST /device/{deviceID}/members` to grant it and records a time-limited grant (`src/grants/store.ts`) with an `expiresAt` computed from the chosen duration
   4. The message is updated in place with a confirmation/failure/already-had-it result, visible to everyone in the channel, and optionally mirrored to `AUDIT_CHANNEL_ID`
+  5. A background poller (`src/grants/scheduler.ts`, `startExpirationScheduler`) checks every 15 minutes for grants past their `expiresAt`, calls `POST /device/{deviceID}/members/delete` to revoke them, and posts a notice back into the original request channel
 - **Styling:** N/A (backend service, no UI beyond the Slack message)
 - **Key Files:**
-  - `src/index.ts` — Bolt app bootstrap, Socket Mode start
+  - `src/index.ts` — Bolt app bootstrap, Socket Mode start, starts the expiration scheduler
   - `src/config.ts` — env var loading/validation
   - `src/jumpdesktop/client.ts` — Jump Desktop API client (`findTeamUserByEmail`, `listTeamDevices`, `listTeamUsers`, `grantDeviceAccess`, `revokeDeviceAccess`, `getDeviceConnectionUrls`); logs every mutating call for audit purposes
   - `src/jumpdesktop/types.ts` — API response types + `JumpDesktopApiError`
-  - `src/slack/message.ts` — builds the in-channel request message's blocks, given a `RequestState`
+  - `src/grants/store.ts` — JSON-file-backed store (`data/grants.json`) of active time-limited grants; survives redeploys via a Docker volume mount (see deployment notes above)
+  - `src/grants/scheduler.ts` — polls the store and auto-revokes access once a grant's duration has elapsed
+  - `src/slack/message.ts` — builds the in-channel request message's blocks, given a `RequestState` (office, computer, requester, duration)
   - `src/slack/teams.ts` — office code ↔ Jump Desktop team ID mapping
   - `src/slack/handlers.ts` — slash command, per-field `block_actions`/`options` handlers, submit/cancel handlers (the core grant-access logic, plus the in-memory per-message state store)
 
@@ -121,8 +126,8 @@ docker logs -f jd-gfx-access
 ### Phase 4 — Hardening & Rollout
 - [x] Deployed on-prem: `znyvps1` (Linux/Docker), cloned via a repo-scoped read-only deploy key — see "On-prem deployment (Docker)" above for the raw `docker build`/`run` commands this host actually needs (its `docker-compose` is too old for its own daemon)
 - [x] Logging/audit trail of who was granted access to what, when — `src/jumpdesktop/client.ts` logs every mutating Jump Desktop API call (method, path, status, request body) to stdout (`docker logs`); optional `AUDIT_CHANNEL_ID` mirrors confirmations into a Slack channel too
-- [ ] Add error handling/retry for Jump Desktop API failures
-- [ ] Access revocation flow (out of scope for v1? — confirm with stakeholders)
+- [x] Time-limited access + auto-revocation (2026-07-31) — added a "Duration" field (preset days: 1/3/7/14/30/90) to the request form. Fresh grants are recorded in `data/grants.json` (`src/grants/store.ts`) with a computed `expiresAt`; `src/grants/scheduler.ts` polls every 15 minutes and calls `revokeDeviceAccess` once expired, posting a notice back to the original channel. **Requires the `-v $(pwd)/data:/app/data` volume mount on redeploy** — see the on-prem Docker section above. Grants for users who *already* had access before the request are intentionally not scheduled for auto-revocation, since this app didn't create that access and doesn't know why it exists.
+- [ ] Add error handling/retry for Jump Desktop API failures (the scheduler currently logs and retries next tick on failure, but doesn't alert anyone)
 - [ ] Document runbook for troubleshooting failed requests
 - [ ] Pilot with a small group before full rollout to NY/LA GFX teams
 

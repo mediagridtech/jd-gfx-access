@@ -1,5 +1,7 @@
+import { randomUUID } from "crypto";
 import { App } from "@slack/bolt";
 import { config } from "../config";
+import { addGrant } from "../grants/store";
 import {
   findTeamUserByEmail,
   grantDeviceAccess,
@@ -124,6 +126,30 @@ export function registerHandlers(app: App): void {
     });
   });
 
+  app.action(ACTION_IDS.duration, async ({ ack, body, client, action, respond }) => {
+    await ack();
+    if (action.type !== "static_select" || !("message" in body) || !body.message || !body.channel) return;
+
+    const key = stateKey(body.channel.id, body.message.ts);
+    const state = pendingRequests.get(key);
+    if (!state) return;
+    if (body.user.id !== state.requesterId) {
+      await respond({ response_type: "ephemeral", text: "Only the person who started this request can fill it out." });
+      return;
+    }
+
+    const days = Number(action.selected_option?.value);
+    if (!days || Number.isNaN(days)) return;
+    state.durationDays = days;
+
+    await client.chat.update({
+      channel: body.channel.id,
+      ts: body.message.ts,
+      text: "JD GFX Access Request",
+      blocks: buildRequestBlocks(state),
+    });
+  });
+
   // Populate the "Which computer?" dropdown, scoped to the chosen office.
   app.options(ACTION_IDS.computer, async ({ options, body, ack }) => {
     const channelId = body.channel?.id ?? body.container?.channel_id;
@@ -208,8 +234,8 @@ export function registerHandlers(app: App): void {
       await respond({ response_type: "ephemeral", text: "Only the person who started this request can submit it." });
       return;
     }
-    if (!state.office || !isOfficeCode(state.office) || !state.computer || !state.requesterEmail) {
-      await respond({ response_type: "ephemeral", text: "Fill in office, computer, and requester before submitting." });
+    if (!state.office || !isOfficeCode(state.office) || !state.computer || !state.requesterEmail || !state.durationDays) {
+      await respond({ response_type: "ephemeral", text: "Fill in office, computer, requester, and duration before submitting." });
       return;
     }
 
@@ -229,12 +255,28 @@ export function registerHandlers(app: App): void {
 
       if (!alreadyHadAccess) {
         await grantDeviceAccess(teamId, state.computer.id, [requester.id]);
+
+        const grantedAt = new Date();
+        const expiresAt = new Date(grantedAt.getTime() + state.durationDays * 86_400_000);
+        addGrant({
+          id: randomUUID(),
+          teamId,
+          office: state.office,
+          deviceId: state.computer.id,
+          deviceName: state.computer.name,
+          userId: requester.id,
+          userEmail: state.requesterEmail,
+          channelId: body.channel.id,
+          grantedBy: state.requesterId,
+          grantedAt: grantedAt.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+        });
       }
 
       state.status = "submitted";
       state.statusDetail = alreadyHadAccess
-        ? `:information_source: <@${state.requesterId}> requested access for *${state.requesterEmail}* to *${state.computer.name}* (${state.office}), but they already had it — no change made.`
-        : `:white_check_mark: <@${state.requesterId}> granted *${state.requesterEmail}* access to *${state.computer.name}* (${state.office}).`;
+        ? `:information_source: <@${state.requesterId}> requested access for *${state.requesterEmail}* to *${state.computer.name}* (${state.office}), but they already had it — no change made (no expiration scheduled, since this app didn't grant that access).`
+        : `:white_check_mark: <@${state.requesterId}> granted *${state.requesterEmail}* access to *${state.computer.name}* (${state.office}) for *${state.durationDays} day(s)* — access will be automatically revoked after that.`;
       pendingRequests.delete(key);
 
       await client.chat.update({
